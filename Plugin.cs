@@ -296,24 +296,18 @@ namespace ParanoiaMod
         {
             while(isSpeaking)
             {
-                float duration = 0.01f;
+                AudioSource audioSource = playerVoiceIngameSettings._playbackComponent.AudioSource;
 
-                AudioClip audioClip = playerVoiceIngameSettings._playbackComponent.AudioSource.clip;
+                audioBuffer.sampleRate = audioSource.clip.frequency;
 
-                while(audioClip.loadState != AudioDataLoadState.Loaded)
-                {
-                    yield return new WaitForSeconds(0.001f);
-                }
+                float[] data = new float[audioSource.clip.samples];
+                audioSource.GetOutputData(data, 1);
 
-                Plugin.Instance.Logger.LogInfo(" - - - - Grabbing " + audioClip.samples + " +++ "+audioClip.frequency+" - - - - ");
-                audioBuffer.sampleRate = audioClip.frequency;
-                float[] data = new float[audioClip.samples];
-                audioClip.GetData(data, 0);
+                Plugin.Instance.Logger.LogInfo(" - - - - Grabbing " + audioSource.clip.frequency + " +++ " + audioSource.clip.samples + " - - - - ");
 
                 audioBuffer.Capture(data);
-                duration = audioClip.length;
 
-                yield return new WaitForSeconds(duration);
+                yield return new WaitForSeconds(audioSource.clip.length);
             }
             audioBuffer.SaveToWav();
         }
