@@ -275,7 +275,8 @@ namespace ParanoiaMod
 
 
 
-
+    //  derived from Gregorio Zanon's script
+    //  http://forum.unity3d.com/threads/119295-Writing-AudioListener.GetOutputData-to-wav-problem?p=806734&viewfull=1#post806734
     public static class SavWav
     {
 
