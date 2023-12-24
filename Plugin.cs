@@ -179,8 +179,8 @@ namespace ParanoiaMod
             }
 
             // From Dissonance.Audio.Playback SamplePlaybackComponent
-            DebugSettings.Instance.EnablePlaybackDiagnostics = true;
-            DebugSettings.Instance.RecordFinalAudio = true;
+            // DebugSettings.Instance.EnablePlaybackDiagnostics = true;
+            // DebugSettings.Instance.RecordFinalAudio = true;
 
 
 
@@ -297,19 +297,23 @@ namespace ParanoiaMod
             while(isSpeaking)
             {
                 float duration = 0.01f;
-                try
-                {
-                    AudioClip audioClip = playerVoiceIngameSettings._playbackComponent.AudioSource.clip;
-                    Plugin.Instance.Logger.LogInfo(" - - - - Grabbing " + audioClip.samples + "- - - - ");
-                    audioBuffer.sampleRate = audioClip.frequency;
-                    float[] data = new float[audioClip.samples];
-                    audioClip.GetData(data, 0);
-                    audioBuffer.Capture(data);
-                    duration = audioClip.length;
-                }
-                catch (Exception e) { }
-                yield return new WaitForSeconds(duration);
 
+                AudioClip audioClip = playerVoiceIngameSettings._playbackComponent.AudioSource.clip;
+
+                while(audioClip.loadState != AudioDataLoadState.Loaded)
+                {
+                    yield return new WaitForSeconds(0.001f);
+                }
+
+                Plugin.Instance.Logger.LogInfo(" - - - - Grabbing " + audioClip.samples + " +++ "+audioClip.frequency+" - - - - ");
+                audioBuffer.sampleRate = audioClip.frequency;
+                float[] data = new float[audioClip.samples];
+                audioClip.GetData(data, 0);
+
+                audioBuffer.Capture(data);
+                duration = audioClip.length;
+
+                yield return new WaitForSeconds(duration);
             }
             audioBuffer.SaveToWav();
         }
