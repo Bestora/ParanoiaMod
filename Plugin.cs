@@ -21,6 +21,9 @@ using Dissonance.Audio.Capture;
 using NAudio.Wave;
 using UnityEngine.Rendering;
 using Microsoft.SqlServer.Server;
+using Dissonance.Integrations.Unity_NFGO;
+using System.Collections;
+using Dissonance.Config;
 
 namespace ParanoiaMod
 {
@@ -145,22 +148,79 @@ namespace ParanoiaMod
                 Instance = this;
             }
 
-            ParanoiaModMicrophoneSubscriber paranoiaModMicrophoneSubscriber = new ParanoiaModMicrophoneSubscriber();
-            paranoiaModMicrophoneSubscriber.Awake();
         }
 
         private void Update()
         {
-            if (playerVoiceIngameSettings == null) { 
+
+            //VoicePlayback playbackComponent = GetComponent<VoicePlayback>();
+            
+            //DissonanceComms comms = StartOfRound.Instance.voiceChatModule;
+
+
+            //foreach (PlayerControllerB playerControllerB in StartOfRound.Instance.allPlayerScripts)
+            //{
+            //    string username = playerControllerB.playerUsername;
+
+            //    //comms.PlayerChannels.
+
+
+            //    IDissonancePlayer player = playerControllerB.voicePlayerState.Tracker;
+            //}
+
+            //VoicePlayerState voicePlayerState = comms.FindPlayer(comms.LocalPlayerName);
+
+            try
+            {
+                RefreshPlayerVoicePlaybackObjects();
+            } catch (Exception e)
+            {
+                
+            }
+
+            // From Dissonance.Audio.Playback SamplePlaybackComponent
+            DebugSettings.Instance.EnablePlaybackDiagnostics = true;
+            DebugSettings.Instance.RecordFinalAudio = true;
+
+
+
+                subscribePlayerVoice();
+
+        }
+
+        public void RefreshPlayerVoicePlaybackObjects()
+        {
+            PlayerVoiceIngameSettings[] playerVoiceIngameSettings = FindObjectsOfType<PlayerVoiceIngameSettings>(includeInactive: true);
+
+            foreach(PlayerVoiceIngameSettings playerVoiceIngameSetting in playerVoiceIngameSettings)
+            {
+                if(ParanoiaModVoiceGrabber.Instances.ContainsKey(playerVoiceIngameSetting._playerState.Name))
+                {
+                    continue;
+                }
+
+                Plugin.Instance.Logger.LogInfo(" - - - - Grabbing " + playerVoiceIngameSetting._playerState.Name + " - - - - ");
+                ParanoiaModVoiceGrabber paranoiaModVoiceGrabber = new ParanoiaModVoiceGrabber(playerVoiceIngameSetting);
+                playerVoiceIngameSetting._playerState.OnStartedSpeaking += paranoiaModVoiceGrabber.OnStartedSpeaking;
+                playerVoiceIngameSetting._playerState.OnStoppedSpeaking += paranoiaModVoiceGrabber.OnStoppedSpeaking;
+            }
+
+        }
+
+        private void subscribePlayerVoice()
+        {
+
+            if (playerVoiceIngameSettings == null)
+            {
                 try
                 {
                     playerVoiceIngameSettings = FindObjectOfType<PlayerVoiceIngameSettings>();
-                    if(playerVoiceIngameSettings == null )
+                    if (playerVoiceIngameSettings == null)
                     {
                         return;
                     }
 
-                    playerVoiceIngameSettings._dissonanceComms.SubscribeToRecordedAudio(ParanoiaModMicrophoneSubscriber.Instance);
+                    playerVoiceIngameSettings._dissonanceComms.SubscribeToRecordedAudio(new ParanoiaModMicrophoneSubscriber());
                     Plugin.Instance.Logger.LogInfo(" - - - - Got PlayerVoiceIngameSettings - - - - ");
                 }
                 catch (Exception e)
@@ -168,73 +228,122 @@ namespace ParanoiaMod
 
                 }
             }
-
         }
 
+        public void StartACoroutine(IEnumerator function)
+        {
+            StartCoroutine(function);
+        }
     }
 
     internal class ParanoiaModMicrophoneSubscriber : MonoBehaviour, IMicrophoneSubscriber
     {
-        public static ParanoiaModMicrophoneSubscriber Instance { get; private set; }
-
-
-        private int fileCount = 0;
-        private string audioFolder;
-        private List<float[]> bufferList = new List<float[]>();
-        private WaveFormat lastWaveFormat;
-        private float silenceTime = 0;
-
-        public void Awake()
+        ParanoiaModAudioBuffer audioBuffer;
+        public ParanoiaModMicrophoneSubscriber()
         {
-            if (Instance == null)
-            {
-                Instance = this;
+            audioBuffer = new ParanoiaModAudioBuffer("me");
+            Plugin.Instance.Logger.LogInfo(" - - - - Microphone Subscriber - - - - ");
 
-                Plugin.Instance.Logger.LogInfo(" - - - - Awake Microphone - - - - ");
-
-                audioFolder = Path.Combine(Application.dataPath, "..", "ParanoiaModSamples");
-
-                if (!Directory.Exists(audioFolder))
-                {
-                    Directory.CreateDirectory(audioFolder);
-                }
-                if (!Directory.Exists(audioFolder + "/OwnPlayerAudio"))
-                {
-                    Directory.CreateDirectory(audioFolder + "/OwnPlayerAudio");
-                }
-                if (!Directory.Exists(audioFolder + "/OtherPlayerAudio"))
-                {
-                    Directory.CreateDirectory(audioFolder + "/OtherPlayerAudio");
-                }
-            }
         }
 
         public void ReceiveMicrophoneData(ArraySegment<float> buffer, WaveFormat format)
         {
             float[] data = buffer.Array;
-            Plugin.Instance.Logger.LogInfo(" - - - - Buffer "+bufferList.Count+" - - - - ");
+            audioBuffer.Capture(data);
+            audioBuffer.sampleRate = format.SampleRate;
+        }
 
+        public void Reset()
+        {
+            Plugin.Instance.Logger.LogInfo(" - - - - Microphone Subscriber Reset - - - - ");
+            audioBuffer.SaveToWav();
+        }
+    }
 
-            bool silence = data.Min() > -0.25f && data.Max() < 0.25f;
+    internal class ParanoiaModVoiceGrabber
+    {
+        public static Dictionary<string, ParanoiaModVoiceGrabber> Instances = new Dictionary<string, ParanoiaModVoiceGrabber>();
+        private PlayerVoiceIngameSettings playerVoiceIngameSettings;
+        private bool isSpeaking = false;
+        ParanoiaModAudioBuffer audioBuffer;
 
-            if (silenceTime+1f < Time.time)
+        public ParanoiaModVoiceGrabber(PlayerVoiceIngameSettings playerVoiceIngameSettings)
+        {
+            Plugin.Instance.Logger.LogInfo(" - - - - VoiceGrabbing "+ playerVoiceIngameSettings._playerState.Name + "- - - - ");
+
+            Instances.Add(playerVoiceIngameSettings._playerState.Name, this);
+            this.playerVoiceIngameSettings = playerVoiceIngameSettings;
+            audioBuffer = new ParanoiaModAudioBuffer(playerVoiceIngameSettings._playerState.Name);
+        }
+
+        public void OnStartedSpeaking(VoicePlayerState voicePlayerState)
+        {
+            Plugin.Instance.Logger.LogInfo(" - - - - StartedSpeaking " + playerVoiceIngameSettings._playerState.Name + "- - - - ");
+
+            isSpeaking = true;
+            ParanoiaModPersistent.Instance.StartACoroutine(TryGrabbing());
+        }
+
+        public void OnStoppedSpeaking(VoicePlayerState voicePlayerState)
+        {
+
+            Plugin.Instance.Logger.LogInfo(" - - - - StartedSpeaking " + playerVoiceIngameSettings._playerState.Name + "- - - - ");
+
+            isSpeaking = false;
+        }
+
+        private IEnumerator TryGrabbing()
+        {
+            while(isSpeaking)
             {
-                SaveToWav();
-
-                if (silence)
+                float duration = 0.01f;
+                try
                 {
-                    return;
+                    AudioClip audioClip = playerVoiceIngameSettings._playbackComponent.AudioSource.clip;
+                    Plugin.Instance.Logger.LogInfo(" - - - - Grabbing " + audioClip.samples + "- - - - ");
+                    audioBuffer.sampleRate = audioClip.frequency;
+                    float[] data = new float[audioClip.samples];
+                    audioClip.GetData(data, 0);
+                    audioBuffer.Capture(data);
+                    duration = audioClip.length;
                 }
-            } 
+                catch (Exception e) { }
+                yield return new WaitForSeconds(duration);
 
-            lastWaveFormat = format;
-            float[] clonedData = (float[]) data.Clone();
-            bufferList.Add(clonedData);
-
-            if (!silence)
-            {
-                silenceTime = Time.time;
             }
+            audioBuffer.SaveToWav();
+        }
+    }
+
+
+    internal class ParanoiaModAudioBuffer
+    {
+        private int fileCount = 0;
+        private string audioFolder;
+        private List<float[]> bufferList = new List<float[]>();
+        private float silenceTime = 0;
+        private string player;
+        public int sampleRate;
+
+        public ParanoiaModAudioBuffer(string player)
+        {
+            this.player = player;
+            Plugin.Instance.Logger.LogInfo(" - - - - Init Buffer (" + player + ") - - - - ");
+
+            audioFolder = Path.Combine(Application.dataPath, "..", "ParanoiaModSamples");
+
+            if (!Directory.Exists(audioFolder))
+            {
+                Directory.CreateDirectory(audioFolder);
+            }
+
+            audioFolder = audioFolder + "/" + player;
+
+            if (!Directory.Exists(audioFolder))
+            {
+                Directory.CreateDirectory(audioFolder);
+            }
+
         }
 
         public void SaveToWav()
@@ -242,32 +351,51 @@ namespace ParanoiaMod
             if (bufferList.Count == 0) return;
 
             int bufferSize = 0;
-            foreach(float[] buffer in  bufferList)
+            foreach (float[] buffer in bufferList)
             {
-                bufferSize+= buffer.Length;
+                bufferSize += buffer.Length;
             }
 
             fileCount++;
-            AudioClip audioClip = AudioClip.Create("a", bufferSize, lastWaveFormat.Channels, lastWaveFormat.SampleRate, false);
+            AudioClip audioClip = AudioClip.Create("a", bufferSize, 1, sampleRate, false);
 
             int offset = 0;
             foreach (float[] buffer in bufferList)
             {
                 audioClip.SetData(buffer, offset);
-                offset+= buffer.Length;
+                offset += buffer.Length;
             }
-            SavWav.Save(audioFolder + "/OwnPlayerAudio/Custom" + fileCount + ".wav", audioClip);
-            Plugin.Instance.Logger.LogInfo(" - - - - Save - - - - ");
-            Plugin.Instance.Logger.LogInfo(audioFolder + "/OwnPlayerAudio/Custom" + fileCount + ".wav");
+            SavWav.Save(audioFolder + "/Sample_" + fileCount + ".wav", audioClip);
+            Plugin.Instance.Logger.LogInfo(" - - - - Save (" + player + ") - - - - ");
 
             bufferList.Clear();
         }
 
-        public void Reset()
+        public void Capture(float[] data)
         {
-            Plugin.Instance.Logger.LogInfo(" - - - - Reset - - - - ");
-            SaveToWav();
+            bool silence = data.Min() > -0.25f && data.Max() < 0.25f;
+
+            if (silenceTime + 1f < Time.time)
+            {
+                SaveToWav();
+
+                if (silence)
+                {
+                    return;
+                }
+            }
+
+            float[] clonedData = (float[])data.Clone();
+            bufferList.Add(clonedData);
+            Plugin.Instance.Logger.LogInfo(" - - - - Buffer " + bufferList.Count + " (" + player + ") - - - - ");
+
+            if (!silence)
+            {
+                silenceTime = Time.time;
+            }
         }
+
+
     }
 
 
