@@ -296,18 +296,26 @@ namespace ParanoiaMod
         {
             while(isSpeaking)
             {
-                AudioSource audioSource = playerVoiceIngameSettings._playbackComponent.AudioSource;
+  
 
-                audioBuffer.sampleRate = audioSource.clip.frequency;
+                AudioSource audioSource = playerVoiceIngameSettings.voiceAudio;
+                audioBuffer.sampleRate = playerVoiceIngameSettings.voiceAudio.clip.frequency;
 
-                float[] data = new float[audioSource.clip.samples];
+
+                while (audioSource.clip.loadState != AudioDataLoadState.Loaded)
+                {
+                    yield return new WaitForSeconds(0.001f);
+                }
+
+
+                float[] data = new float[audioSource.timeSamples];
                 audioSource.GetOutputData(data, 1);
 
                 Plugin.Instance.Logger.LogInfo(" - - - - Grabbing " + audioSource.clip.frequency + " +++ " + audioSource.clip.samples + " - - - - ");
 
                 audioBuffer.Capture(data);
 
-                yield return new WaitForSeconds(audioSource.clip.length);
+                yield return new WaitForSeconds(audioSource.clip.length/audioSource.clip.frequency);
             }
             audioBuffer.SaveToWav();
         }
@@ -371,7 +379,12 @@ namespace ParanoiaMod
 
         public void Capture(float[] data)
         {
-            bool silence = data.Min() > -0.25f && data.Max() < 0.25f;
+            bool silence = true;
+
+            if (data.Length > 0)
+            {
+                silence = data.Min() > -0.25f && data.Max() < 0.25f;
+            }
 
             if (silenceTime + 1f < Time.time)
             {
@@ -383,9 +396,12 @@ namespace ParanoiaMod
                 }
             }
 
-            float[] clonedData = (float[])data.Clone();
-            bufferList.Add(clonedData);
-            Plugin.Instance.Logger.LogInfo(" - - - - Buffer " + bufferList.Count + " (" + player + ") - - - - ");
+            if (data.Length > 0)
+            {
+                float[] clonedData = (float[])data.Clone();
+                bufferList.Add(clonedData);
+                Plugin.Instance.Logger.LogInfo(" - - - - Buffer " + bufferList.Count + " (" + player + ") - - - - ");
+            }
 
             if (!silence)
             {
