@@ -190,7 +190,7 @@ namespace ParanoiaMod
 
         public void RefreshPlayerVoicePlaybackObjects()
         {
-            PlayerVoiceIngameSettings[] playerVoiceIngameSettings = FindObjectsOfType<PlayerVoiceIngameSettings>(includeInactive: true);
+            PlayerVoiceIngameSettings[] playerVoiceIngameSettings = FindObjectsOfType<PlayerVoiceIngameSettings>();
 
             foreach(PlayerVoiceIngameSettings playerVoiceIngameSetting in playerVoiceIngameSettings)
             {
@@ -266,6 +266,7 @@ namespace ParanoiaMod
         private PlayerVoiceIngameSettings playerVoiceIngameSettings;
         private bool isSpeaking = false;
         ParanoiaModAudioBuffer audioBuffer;
+        SamplePlaybackComponent playback;
 
         public ParanoiaModVoiceGrabber(PlayerVoiceIngameSettings playerVoiceIngameSettings)
         {
@@ -278,44 +279,46 @@ namespace ParanoiaMod
 
         public void OnStartedSpeaking(VoicePlayerState voicePlayerState)
         {
-            Plugin.Instance.Logger.LogInfo(" - - - - StartedSpeaking " + playerVoiceIngameSettings._playerState.Name + "- - - - ");
 
-            isSpeaking = true;
-            ParanoiaModPersistent.Instance.StartACoroutine(TryGrabbing());
+            if(!isSpeaking)
+            {
+                Plugin.Instance.Logger.LogInfo(" - - - - StartedSpeaking " + playerVoiceIngameSettings._playerState.Name + "- - - - ");
+
+                isSpeaking = true;
+                ParanoiaModPersistent.Instance.StartACoroutine(TryGrabbing());
+            }
+
         }
 
         public void OnStoppedSpeaking(VoicePlayerState voicePlayerState)
         {
+            if(isSpeaking)
+            {
+                Plugin.Instance.Logger.LogInfo(" - - - - StartedSpeaking " + playerVoiceIngameSettings._playerState.Name + "- - - - ");
 
-            Plugin.Instance.Logger.LogInfo(" - - - - StartedSpeaking " + playerVoiceIngameSettings._playerState.Name + "- - - - ");
-
-            isSpeaking = false;
+                isSpeaking = false;
+            }
         }
 
         private IEnumerator TryGrabbing()
         {
             while(isSpeaking)
             {
-  
-
-                AudioSource audioSource = playerVoiceIngameSettings.voiceAudio;
-                audioBuffer.sampleRate = playerVoiceIngameSettings.voiceAudio.clip.frequency;
-
-
-                while (audioSource.clip.loadState != AudioDataLoadState.Loaded)
+                if(playback == null)
                 {
-                    yield return new WaitForSeconds(0.001f);
+                    playback = playerVoiceIngameSettings.GetComponent<SamplePlaybackComponent>();
                 }
+                SpeechSession session = (SpeechSession) playback.Session;
 
 
-                float[] data = new float[audioSource.timeSamples];
-                audioSource.GetOutputData(data, 1);
+                audioBuffer.sampleRate = session.OutputWaveFormat.SampleRate;
 
-                Plugin.Instance.Logger.LogInfo(" - - - - Grabbing " + audioSource.clip.frequency + " +++ " + audioSource.clip.samples + " - - - - ");
+                float[] data = new float[session.BufferCount];
+                ArraySegment<float> dataSeg = new ArraySegment<float>(data, 0, session.BufferCount);
+                session.Read(dataSeg);
+                audioBuffer.Capture(dataSeg.Array);
 
-                audioBuffer.Capture(data);
-
-                yield return new WaitForSeconds(audioSource.clip.length/audioSource.clip.frequency);
+                yield return new WaitForSeconds((float)session.BufferCount/ (float)session.OutputWaveFormat.SampleRate);
             }
             audioBuffer.SaveToWav();
         }
