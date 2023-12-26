@@ -1,29 +1,19 @@
 ﻿using BepInEx;
 using BepInEx.Configuration;
 using BepInEx.Logging;
-using DunGen;
-using GameNetcodeStuff;
 using HarmonyLib;
-using JetBrains.Annotations;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using UnityEngine;
-using UnityEngine.PlayerLoop;
-using static System.Collections.Specialized.BitVector32;
-using static System.Net.WebRequestMethods;
 using Dissonance;
-using Dissonance.Audio.Playback;
 using Dissonance.Audio.Capture;
 using NAudio.Wave;
-using UnityEngine.Rendering;
-using Microsoft.SqlServer.Server;
-using Dissonance.Integrations.Unity_NFGO;
 using System.Collections;
-using Dissonance.Config;
+using static System.Net.Mime.MediaTypeNames;
+using System.Reflection;
+using static UnityEngine.AudioClip;
 
 namespace ParanoiaMod
 {
@@ -153,23 +143,6 @@ namespace ParanoiaMod
         private void Update()
         {
 
-            //VoicePlayback playbackComponent = GetComponent<VoicePlayback>();
-            
-            //DissonanceComms comms = StartOfRound.Instance.voiceChatModule;
-
-
-            //foreach (PlayerControllerB playerControllerB in StartOfRound.Instance.allPlayerScripts)
-            //{
-            //    string username = playerControllerB.playerUsername;
-
-            //    //comms.PlayerChannels.
-
-
-            //    IDissonancePlayer player = playerControllerB.voicePlayerState.Tracker;
-            //}
-
-            //VoicePlayerState voicePlayerState = comms.FindPlayer(comms.LocalPlayerName);
-
             try
             {
                 RefreshPlayerVoicePlaybackObjects();
@@ -266,7 +239,7 @@ namespace ParanoiaMod
         private PlayerVoiceIngameSettings playerVoiceIngameSettings;
         private bool isSpeaking = false;
         ParanoiaModAudioBuffer audioBuffer;
-        SamplePlaybackComponent playback;
+        private bool isSubscribed = false;
 
         public ParanoiaModVoiceGrabber(PlayerVoiceIngameSettings playerVoiceIngameSettings)
         {
@@ -285,9 +258,13 @@ namespace ParanoiaMod
                 Plugin.Instance.Logger.LogInfo(" - - - - StartedSpeaking " + playerVoiceIngameSettings._playerState.Name + "- - - - ");
 
                 isSpeaking = true;
-                ParanoiaModPersistent.Instance.StartACoroutine(TryGrabbing());
             }
+            subscribeToPCMReaderCallback();
 
+            try
+            {
+            }
+            catch(Exception e) { }
         }
 
         public void OnStoppedSpeaking(VoicePlayerState voicePlayerState)
@@ -300,27 +277,42 @@ namespace ParanoiaMod
             }
         }
 
-        private IEnumerator TryGrabbing()
+        public static Delegate ConvertDelegate(Delegate originalDelegate, Type targetDelegateType)
         {
-            while(isSpeaking)
+            return Delegate.CreateDelegate(
+                targetDelegateType,
+                originalDelegate.Target,
+                originalDelegate.Method);
+        }
+
+        private void subscribeToPCMReaderCallback()
+        {
+
+            if(isSubscribed)
             {
-                if(playback == null)
-                {
-                    playback = playerVoiceIngameSettings.GetComponent<SamplePlaybackComponent>();
-                }
-                SpeechSession session = (SpeechSession) playback.Session;
-
-
-                audioBuffer.sampleRate = session.OutputWaveFormat.SampleRate;
-
-                float[] data = new float[session.BufferCount];
-                ArraySegment<float> dataSeg = new ArraySegment<float>(data, 0, session.BufferCount);
-                session.Read(dataSeg);
-                audioBuffer.Capture(dataSeg.Array);
-
-                yield return new WaitForSeconds((float)session.BufferCount/ (float)session.OutputWaveFormat.SampleRate);
+                return;
             }
-            audioBuffer.SaveToWav();
+
+            AudioClip audioClip = playerVoiceIngameSettings._playbackComponent.AudioSource.clip;
+            audioBuffer.sampleRate = audioClip.frequency;
+
+            EventInfo eventInfo = audioClip.GetType().GetEvent("m_PCMReaderCallback", BindingFlags.NonPublic | BindingFlags.Instance);
+
+            PCMReaderCallback callback = new PCMReaderCallback(this.GrabPCM);
+
+
+            var addMethod = eventInfo.GetAddMethod(true);
+            addMethod.Invoke(audioClip, new[] { callback });
+
+            Plugin.Instance.Logger.LogInfo(" - - - - Successfully subscribed " + playerVoiceIngameSettings._playerState.Name + "- - - - ");
+            isSubscribed = true;
+        }
+
+        private void GrabPCM(float[] data)
+        {
+            Plugin.Instance.Logger.LogInfo(" - - - - GrabPCM " + playerVoiceIngameSettings._playerState.Name + "- - - - ");
+
+            audioBuffer.Capture(data);
         }
     }
 
@@ -339,7 +331,7 @@ namespace ParanoiaMod
             this.player = player;
             Plugin.Instance.Logger.LogInfo(" - - - - Init Buffer (" + player + ") - - - - ");
 
-            audioFolder = Path.Combine(Application.dataPath, "..", "ParanoiaModSamples");
+            audioFolder = Path.Combine(UnityEngine.Application.dataPath, "..", "ParanoiaModSamples");
 
             if (!Directory.Exists(audioFolder))
             {
@@ -434,7 +426,7 @@ namespace ParanoiaMod
                 filename += ".wav";
             }
 
-            var filepath = Path.Combine(Application.persistentDataPath, filename);
+            var filepath = Path.Combine(UnityEngine.Application.persistentDataPath, filename);
 
             Debug.Log(filepath);
 
